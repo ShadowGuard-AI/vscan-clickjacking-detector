@@ -68,6 +68,9 @@ def check_clickjacking(url):
         # Send an HTTP request to the URL
         try:
             response = requests.get(url, timeout=10) # Added timeout
+            # An error status answer is folded into check failed, exit 1, instead
+            # of being judged. Sites that serve their 404 page without framing
+            # headers, a very common shape, get no verdict from this tool.
             response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
         except requests.exceptions.RequestException as e:
             logging.error(f"Request failed: {e}")
@@ -75,6 +78,9 @@ def check_clickjacking(url):
 
         # Check for X-Frame-Options header
         x_frame_options = response.headers.get("X-Frame-Options")
+        # Any non empty value ends the check as protected. A misspelled or
+        # invented value that browsers ignore entirely counts the same as
+        # DENY, because the content of the header is never read.
         if x_frame_options:
             logging.info(f"X-Frame-Options header found: {x_frame_options}")
             return False, f"X-Frame-Options header found: {x_frame_options}. Site is likely protected."
@@ -85,6 +91,10 @@ def check_clickjacking(url):
         content_security_policy = response.headers.get("Content-Security-Policy")
         if content_security_policy:
             logging.info(f"Content-Security-Policy header found: {content_security_policy}")
+            # frame-src does not belong in this test. It governs what this page
+            # may frame, not who may frame this page, so a policy carrying only
+            # frame-src is passed as protected while framing stays open. Only
+            # frame-ancestors speaks to the question this tool asks.
             if "frame-ancestors" in content_security_policy or "frame-src" in content_security_policy:
                 return False, f"Content-Security-Policy header found: {content_security_policy}. Site is likely protected."
             else:
@@ -94,6 +104,9 @@ def check_clickjacking(url):
             logging.warning("Content-Security-Policy header not found.")
 
         # Check for frame busting JavaScript in the HTML
+        # Only inline script text is searched. A frame busting file loaded
+        # through a script src is never fetched, so a page protected the
+        # common external way is reported as unprotected here.
         soup = BeautifulSoup(response.text, "html.parser")
         if has_frame_busting_script(soup):
              logging.info("Frame busting JavaScript found.")
